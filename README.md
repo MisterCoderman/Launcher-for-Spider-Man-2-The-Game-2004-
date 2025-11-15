@@ -1,4 +1,4 @@
-This launcher is designed to ensure proper operation of Spider-Man 2 (2005) on modern versions of Windows.
+This launcher is designed to ensure proper operation of Spider-Man 2 (2004) on modern versions of Windows.
 Place the file into the game folder and always start the game through Launcher.exe.
 Each launch automatically applies the required settings and fixes.
 
@@ -28,7 +28,7 @@ Webhead.ini (if present)
 <hr>
 
 
-Этот лаунчер предназначен для корректной работы Spider-Man 2 (2005) на современных версиях Windows.
+Этот лаунчер предназначен для корректной работы Spider-Man 2 (2004) на современных версиях Windows.
 Поместите файл в папку с игрой и запускайте игру только через Launcher.exe.
 Каждый запуск автоматически применяет необходимые параметры и исправления.
 
