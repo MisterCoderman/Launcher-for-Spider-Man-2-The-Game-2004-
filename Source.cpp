@@ -1,290 +1,223 @@
-// Spider-Man 2 (2005) Launcher
-// VS 2015 + v140_xp | MR.CODERMAN 2025
-
+Ôªø// Spider-Man 2 (2005) Silent Launcher ‚Äî MR.CODERMAN 2025
+// No black console window, no key press required
 #include <windows.h>
 #include <shellapi.h>
-#include <iostream>
-#include <fstream>
 #include <string>
 #include <vector>
 #include <algorithm>
 #include <sstream>
-#include <io.h>
-#include <fcntl.h>
-#include <locale>
-#include <codecvt>
-#include <cmath>
+#include <fstream>
 #include <map>
 #include <iomanip>
-#include <ios>
+#include <cmath>
+#include <io.h>
+#include <locale>
+#include <codecvt>
 
 #pragma warning(disable: 4996)
 #pragma comment(lib, "shell32.lib")
+#pragma comment(linker, "/SUBSYSTEM:WINDOWS")
 
 using namespace std;
 
-// === ‘”Õ ÷»» ¿ƒÃ»Õ¿ » XP (¡≈« »«Ã≈Õ≈Õ»…) ===
+// === Helper functions ===
 BOOL IsRunAsAdmin() {
-    BOOL isAdmin = FALSE;
-    PSID adminGroup = NULL;
-    SID_IDENTIFIER_AUTHORITY ntAuthority = SECURITY_NT_AUTHORITY;
-    if (AllocateAndInitializeSid(&ntAuthority, 2, SECURITY_BUILTIN_DOMAIN_RID,
-        DOMAIN_ALIAS_RID_ADMINS, 0, 0, 0, 0, 0, 0, &adminGroup)) {
-        CheckTokenMembership(NULL, adminGroup, &isAdmin);
-        FreeSid(adminGroup);
+    BOOL fIsRunAsAdmin = FALSE;
+    PSID pAdministratorsGroup = NULL;
+    SID_IDENTIFIER_AUTHORITY NtAuthority = SECURITY_NT_AUTHORITY;
+    if (AllocateAndInitializeSid(&NtAuthority, 2, SECURITY_BUILTIN_DOMAIN_RID,
+        DOMAIN_ALIAS_RID_ADMINS, 0, 0, 0, 0, 0, 0, &pAdministratorsGroup)) {
+        CheckTokenMembership(NULL, pAdministratorsGroup, &fIsRunAsAdmin);
+        FreeSid(pAdministratorsGroup);
     }
-    return isAdmin;
+    return fIsRunAsAdmin;
 }
 
-void RunAsAdmin() {
-    wchar_t exePath[MAX_PATH];
-    GetModuleFileNameW(NULL, exePath, MAX_PATH);
-    SHELLEXECUTEINFO sei = { sizeof(sei) };
+void RelaunchAsAdmin() {
+    wchar_t szPath[MAX_PATH];
+    GetModuleFileNameW(NULL, szPath, MAX_PATH);
+
+    SHELLEXECUTEINFOW sei = { sizeof(sei) };
     sei.lpVerb = L"runas";
-    sei.lpFile = exePath;
+    sei.lpFile = szPath;
+    sei.hwnd = NULL;
     sei.nShow = SW_NORMAL;
+
     if (!ShellExecuteExW(&sei)) {
-        system("pause");
+        MessageBoxW(NULL, L"Administrator rights required!", L"Spider-Man 2 Launcher", MB_ICONERROR);
         ExitProcess(1);
     }
     ExitProcess(0);
 }
 
-void SetXPCompatibilityForGame(const wstring& gameExePath) {
+void SetXPCompatibility(const wstring& exePath) {
     HKEY hKey;
     const wchar_t* subkey = L"Software\\Microsoft\\Windows NT\\CurrentVersion\\AppCompatFlags\\Layers";
-    if (RegCreateKeyExW(HKEY_CURRENT_USER, subkey, 0, NULL, REG_OPTION_NON_VOLATILE,
-        KEY_WRITE, NULL, &hKey, NULL) == ERROR_SUCCESS) {
-        const wchar_t* compat = L"WINXPSP3";
-        RegSetValueExW(hKey, gameExePath.c_str(), 0, REG_SZ, (BYTE*)compat, (wcslen(compat) + 1) * sizeof(wchar_t));
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, subkey, 0, NULL, REG_OPTION_NON_VOLATILE, KEY_WRITE, NULL, &hKey, NULL) == ERROR_SUCCESS) {
+        const wchar_t* value = L"WINXPSP3";
+        RegSetValueExW(hKey, exePath.c_str(), 0, REG_SZ, (BYTE*)value, (wcslen(value) + 1) * sizeof(wchar_t));
         RegCloseKey(hKey);
-        cout << "XP SP3 compatibility set for Webhead.exe." << endl;
     }
 }
 
-wstring to_lower(wstring s) {
-    transform(s.begin(), s.end(), s.begin(), ::towlower);
-    return s;
-}
-
-// === Hor+ FOV Table ===
-double get_hor_plus_fov(double aspect) {
+double GetHorPlusFOV(double aspect) {
     aspect = floor(aspect * 100 + 0.5) / 100.0;
-    static const map<double, double> fov_table = {
+    static const map<double, double> table = {
         {1.25, 56.85}, {1.56, 68.16}, {1.60, 69.43}, {1.67, 71.64},
         {1.78, 75.18}, {1.85, 77.39}, {2.37, 91.49}, {2.39, 91.94},
-        {2.40, 91.96}, {2.40, 92.20}, {2.76, 100.16}, {3.20, 108.36},
-        {3.56, 113.99}, {3.75, 116.75}, {4.00, 120.00}, {4.80, 128.61},
-        {5.00, 130.42}, {5.33, 133.17}
+        {2.40, 92.20}, {2.76, 100.16}, {3.20, 108.36}, {3.56, 113.99},
+        {3.75, 116.75}, {4.00, 120.00}, {4.80, 128.61}, {5.00, 130.42}, {5.33, 133.17}
     };
-    auto it = fov_table.find(aspect);
-    if (it != fov_table.end()) return it->second;
+    auto it = table.find(aspect);
+    if (it != table.end()) return it->second;
 
-    const double default_fov = 60.0, default_aspect = 4.0 / 3.0;
-    double rad = default_fov * 3.14159265358979323846 / 180.0 / 2.0;
-    double tan_fov = tan(rad);
-    double new_rad = 2.0 * atan(tan_fov * (aspect / default_aspect));
-    return new_rad * 180.0 / 3.14159265358979323846;
+    const double defFOV = 60.0, defAspect = 4.0 / 3.0;
+    double rad = defFOV * 3.14159265358979323846 / 180.0 / 2.0;
+    double t = tan(rad) * (aspect / defAspect);
+    return 2.0 * atan(t) * 180.0 / 3.14159265358979323846;
 }
 
-// === Œ·ÌÓ‚ÎÂÌËÂ ‡ÁÂ¯ÂÌËˇ ===
-void update_ini_resolution(const wstring& filename, int width, int height) {
-    wifstream in(filename);
+void UpdateINIResolution(const wstring& file, int w, int h) {
+    wifstream in(file);
     if (!in.is_open()) return;
-    in.imbue(locale(in.getloc(), new codecvt_utf8<wchar_t>()));
+    in.imbue(locale(in.getloc(), new codecvt_utf8<wchar_t>));
+
     vector<wstring> lines;
     wstring line;
-    bool section_found = false, found_x = false, found_y = false;
+    bool inSection = false;
 
     while (getline(in, line)) {
-        wstring lower = to_lower(line);
-        if (lower.find(L"[windrv.windowsclient]") != wstring::npos) section_found = true;
-        if (lower.find(L"fullscreenviewportx=") == 0) { line = L"FullscreenViewportX=" + to_wstring(width); found_x = true; }
-        else if (lower.find(L"fullscreenviewporty=") == 0) { line = L"FullscreenViewportY=" + to_wstring(height); found_y = true; }
+        wstring l = line;
+        transform(l.begin(), l.end(), l.begin(), ::towlower);
+
+        if (l.find(L"[windrv.windowsclient]") != wstring::npos) inSection = true;
+
+        if (l.find(L"fullscreenviewportx=") == 0)
+            line = L"FullscreenViewportX=" + to_wstring(w);
+        else if (l.find(L"fullscreenviewporty=") == 0)
+            line = L"FullscreenViewportY=" + to_wstring(h);
+
         lines.push_back(line);
     }
     in.close();
 
-    if (!found_x) { if (!section_found) lines.push_back(L"[WinDrv.WindowsClient]"); lines.push_back(L"FullscreenViewportX=" + to_wstring(width)); }
-    if (!found_y) { if (!section_found || found_x) lines.push_back(L"[WinDrv.WindowsClient]"); lines.push_back(L"FullscreenViewportY=" + to_wstring(height)); }
-
-    wofstream out(filename);
-    out.imbue(locale(out.getloc(), new codecvt_utf8<wchar_t>()));
+    wofstream out(file);
+    out.imbue(locale(out.getloc(), new codecvt_utf8<wchar_t>));
     for (const auto& l : lines) out << l << L"\r\n";
     out.close();
 }
 
-// === ÕŒ¬¿ﬂ ‘”Õ ÷»ﬂ: “ŒÀ‹ Œ «¿Ã≈Õ¿ FOV (¡≈« —Œ«ƒ¿Õ»ﬂ ‘¿…ÀŒ¬) ===
-void update_user_ini_fov(const wstring& filename, double fov) {
-    // ** –»“»◊ÕŒ: ≈ÒÎË Ù‡ÈÎ‡ Õ≈“ ó œ–Œœ”—“»!**
-    wifstream in(filename);
-    if (!in.is_open()) {
-        cout << "Skipped " << wstring_convert<codecvt_utf8<wchar_t>>().to_bytes(filename) << " (file not found)" << endl;
-        return;
-    }
+void UpdateUserINIFOV(const wstring& file, double fov) {
+    wifstream in(file);
+    if (!in.is_open()) return;
+    in.imbue(locale(in.getloc(), new codecvt_utf8<wchar_t>));
 
-    in.imbue(locale(in.getloc(), new codecvt_utf8<wchar_t>()));
     vector<wstring> lines;
     wstring line;
-    bool found_any_fov = false;
+    bool found = false;
 
-    // ◊ËÚ‡ÂÏ ¬—≈ ÒÚÓÍË Ë »Ÿ≈Ã “ŒÀ‹ Œ FOV ÔÓÎˇ
     while (getline(in, line)) {
-        wstring lower = to_lower(line);
+        wstring l = line;
+        transform(l.begin(), l.end(), l.begin(), ::towlower);
 
-        // «‡ÏÂÌˇÂÏ “ŒÀ‹ Œ FOV ÁÌ‡˜ÂÌËˇ
-        if (lower.find(L"desiredfov=") == 0) {
-            line = L"DesiredFOV=" + to_wstring(fov);
-            found_any_fov = true;
+        if (l.find(L"desiredfov=") == 0 || l.find(L"defaultfov=") == 0 || l.find(L"fovangle=") == 0) {
+            line = L"DesiredFOV=" + to_wstring((int)round(fov));
+            found = true;
         }
-        else if (lower.find(L"defaultfov=") == 0) {
-            line = L"DefaultFOV=" + to_wstring(fov);
-            found_any_fov = true;
-        }
-        else if (lower.find(L"fovangle=") == 0) {
-            line = L"FOVAngle=" + to_wstring(fov);
-            found_any_fov = true;
-        }
-
-        lines.push_back(line);  // —Œ’–¿Õﬂ≈Ã ¬—® Œ—“¿À‹ÕŒ≈  ¿  ≈—“‹
+        lines.push_back(line);
     }
     in.close();
 
-    // ≈ÒÎË FOV ÔÓÎˇ ‚ÓÓ·˘Â Õ≈ Õ¿…ƒ≈Õ€ ó Õ≈ ‰Ó·‡‚ÎˇÂÏ (ÚÓÎ¸ÍÓ Á‡ÏÂÌ‡!)
-    if (!found_any_fov) {
-        cout << "No FOV fields found in " << wstring_convert<codecvt_utf8<wchar_t>>().to_bytes(filename) << " ó skipped" << endl;
-        return;
-    }
+    if (!found) return;
 
-    // —Óı‡ÌˇÂÏ Ò ËÁÏÂÌÂÌËˇÏË
-    wofstream out(filename);
-    out.imbue(locale(out.getloc(), new codecvt_utf8<wchar_t>()));
+    wofstream out(file);
+    out.imbue(locale(out.getloc(), new codecvt_utf8<wchar_t>));
     for (const auto& l : lines) out << l << L"\r\n";
     out.close();
-
-    cout << "FOV updated in " << wstring_convert<codecvt_utf8<wchar_t>>().to_bytes(filename) << ": " << fixed << setprecision(2) << fov << "∞" << endl;
 }
 
-// === œ‡Ú˜ Í‡Ú-ÒˆÂÌ ===
-bool patch_webhead_u(const wstring& system_dir, int width, int height) {
-    wstring filepath = system_dir + L"\\Webhead.u";
-    if (_waccess(filepath.c_str(), 0) == -1) {
-        cout << "Webhead.u not found ó cutscenes fix skipped." << endl;
-        return false;
-    }
+bool PatchCutscenes(const wstring& systemDir, int width, int height) {
+    wstring path = systemDir + L"\\Webhead.u";
+    if (_waccess(path.c_str(), 0) == -1) return false;
 
-    fstream file(filepath, ios::in | ios::out | ios::binary);
-    if (!file.is_open()) {
-        cout << "Cannot open Webhead.u" << endl;
-        return false;
-    }
-
-    const char pattern[12] = { '\x4F','\x48','\x1B','\x24','\x00','\x00','\x70','\x42','\x00','\x47','\x01','\x00' };
-    const char mask[12] = { 'x','x','x','x','?','?','?','?','x','x','x','x' };
+    fstream file(path, ios::in | ios::out | ios::binary);
+    if (!file) return false;
 
     file.seekg(0, ios::end);
-    std::streampos fileSize = file.tellg();
+    size_t size = file.tellg();
     file.seekg(0, ios::beg);
 
-    vector<char> buffer(static_cast<size_t>(fileSize));
-    file.read(buffer.data(), fileSize);
+    vector<char> data(size);
+    file.read(data.data(), size);
 
-    std::streampos offset = std::streampos(-1);
-    for (size_t i = 0; i <= static_cast<size_t>(fileSize) - 12; ++i) {
+    const char pattern[12] = { 0x4F,0x48,0x1B,0x24, 0x00,0x00,0x70,0x42, 0x00,0x47,0x01,0x00 };
+    const char mask[12] = { 'x','x','x','x', '?','?','?','?', 'x','x','x','x' };
+
+    size_t offset = -1;
+    for (size_t i = 0; i <= size - 12; ++i) {
         bool match = true;
-        for (int j = 0; j < 12; ++j) {
-            if (mask[j] == 'x' && buffer[i + j] != pattern[j]) { match = false; break; }
-        }
-        if (match) {
-            for (int j = 0; j < 12; ++j) {
-                if (mask[j] == '?') { offset = static_cast<std::streampos>(i + j); break; }
-            }
-            break;
-        }
+        for (int j = 0; j < 12; ++j)
+            if (mask[j] == 'x' && data[i + j] != pattern[j]) { match = false; break; }
+        if (match) { offset = i + 4; break; }
     }
 
-    if (offset == std::streampos(-1)) {
-        cout << "Cutscene FOV pattern not found!" << endl;
-        file.close();
-        return false;
-    }
+    if (offset == -1) { file.close(); return false; }
 
-    double aspect = static_cast<double>(width) / height;
-    double default_aspect = 4.0 / 3.0;
-    double default_fov = 60.0;
-    double rad = default_fov * 3.14159265358979323846 / 180.0 / 2.0;
-    double tan_fov = tan(rad);
-    double new_rad = 2.0 * atan(tan_fov * (aspect / default_aspect));
-    float new_fov = static_cast<float>(new_rad * 180.0 / 3.14159265358979323846);
+    double aspect = (double)width / height;
+    double newFOV = GetHorPlusFOV(aspect);
+    float fovFloat = (float)newFOV;
 
     file.seekp(offset);
-    file.write(reinterpret_cast<const char*>(&new_fov), sizeof(new_fov));
+    file.write((char*)&fovFloat, sizeof(float));
     file.close();
-
-    cout << "Cutscenes FOV patched: " << fixed << setprecision(2) << new_fov << "∞" << endl;
     return true;
 }
 
-// === MAIN ===
-int main() {
-    SetConsoleCP(65001);
-    SetConsoleOutputCP(CP_UTF8);
-
+// === GUI Entry point ===
+int APIENTRY wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int) {
     if (!IsRunAsAdmin()) {
-        cout << "ERROR: Admin rights required!" << endl;
-        RunAsAdmin();
+        RelaunchAsAdmin();
         return 0;
     }
 
-    cout << "================================================" << endl;
-    cout << "Spider-Man 2 (2005) Launcher" << endl;
-    cout << "MR.CODERMAN 2025" << endl;
-    cout << "================================================" << endl << endl;
-
-    wchar_t exePath[MAX_PATH];
+    wchar_t exePath[MAX_PATH] = { 0 };
     GetModuleFileNameW(NULL, exePath, MAX_PATH);
-    wstring path = exePath;
-    path = path.substr(0, path.find_last_of(L"\\"));
+    wstring launcherDir = exePath;
+    size_t pos = launcherDir.find_last_of(L"\\/");
+    if (pos != wstring::npos) launcherDir.erase(pos);
 
-    wstring system_dir = path + L"\\system";
-    wstring def_ini = system_dir + L"\\Default.ini";
-    wstring web_ini = system_dir + L"\\Webhead.ini";
-    wstring defuser_ini = system_dir + L"\\DefUser.ini";
-    wstring user_ini = system_dir + L"\\User.ini";
-    wstring exe = system_dir + L"\\Webhead.exe";
+    wstring systemDir = launcherDir + L"\\system";
+    wstring exe = systemDir + L"\\Webhead.exe";
 
-    OSVERSIONINFO osvi = { sizeof(osvi) };
-    GetVersionEx(&osvi);
-    if (osvi.dwMajorVersion >= 6) SetXPCompatibilityForGame(exe);
-
-    if (_waccess(def_ini.c_str(), 0) == -1 || _waccess(exe.c_str(), 0) == -1) {
-        cout << "[ERROR] Required files missing!" << endl;
-        system("pause");
+    if (_waccess((systemDir + L"\\Webhead.exe").c_str(), 0) == -1 ||
+        _waccess((systemDir + L"\\Default.ini").c_str(), 0) == -1) {
+        MessageBoxW(NULL, L"Webhead.exe or Default.ini not found!\nPlace launcher in the game folder.",
+            L"Spider-Man 2 Launcher", MB_ICONERROR);
         return 1;
     }
 
     int width = GetSystemMetrics(SM_CXSCREEN);
     int height = GetSystemMetrics(SM_CYSCREEN);
-    double aspect = static_cast<double>(width) / height;
 
-    cout << "Resolution: " << width << " x " << height << endl;
-    cout << "Aspect: " << fixed << setprecision(2) << aspect << ":1" << endl << endl;
+    OSVERSIONINFO osvi = { sizeof(osvi) };
+    GetVersionEx(&osvi);
+    if (osvi.dwMajorVersion >= 6) SetXPCompatibility(exe);
 
-    // –‡ÁÂ¯ÂÌËÂ
-    update_ini_resolution(def_ini, width, height);
-    if (_waccess(web_ini.c_str(), 0) == 0) update_ini_resolution(web_ini, width, height);
+    // Resolution
+    UpdateINIResolution(systemDir + L"\\Default.ini", width, height);
+    if (_waccess((systemDir + L"\\Webhead.ini").c_str(), 0) == 0)
+        UpdateINIResolution(systemDir + L"\\Webhead.ini", width, height);
 
-    // FOV ó “ŒÀ‹ Œ «¿Ã≈Õ¿!
-    double fov = get_hor_plus_fov(aspect);
-    update_user_ini_fov(defuser_ini, fov);
-    update_user_ini_fov(user_ini, fov);
+    // FOV
+    double fov = GetHorPlusFOV((double)width / height);
+    UpdateUserINIFOV(systemDir + L"\\DefUser.ini", fov);
+    UpdateUserINIFOV(systemDir + L"\\User.ini", fov);
 
-    //  ‡Ú-ÒˆÂÌ˚
-    patch_webhead_u(system_dir, width, height);
+    // Cutscenes
+    PatchCutscenes(systemDir, width, height);
 
-    cout << endl << "Launching..." << endl;
-    ShellExecuteW(NULL, L"open", exe.c_str(), NULL, system_dir.c_str(), SW_SHOWNORMAL);
+    // Launch game
+    ShellExecuteW(NULL, L"open", exe.c_str(), NULL, systemDir.c_str(), SW_SHOWNORMAL);
 
-    cout << endl << "Done!" << endl;
     return 0;
 }
